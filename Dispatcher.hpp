@@ -124,10 +124,10 @@ class Dispatcher {
 		std::mutex m_mutex;
 		std::chrono::time_point<std::chrono::steady_clock> timeStart;
 		unsigned int m_countPrint;
-		unsigned int m_countRunning;
-		size_t m_sizeInitTotal;
-		size_t m_sizeInitDone;
-		bool m_quit;
+		unsigned int m_countRunning{};
+		size_t m_sizeInitTotal{};
+		size_t m_sizeInitDone{};
+		bool m_quit{};
 		cl_ulong4 m_publicKeyX;
 		cl_ulong4 m_publicKeyY;
 		std::string m_seedPrivateKey;  // Seed private key for calculating final private key

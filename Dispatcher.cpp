@@ -441,27 +441,25 @@ Dispatcher::Device::~Device() {
 
 Dispatcher::Dispatcher(cl_context & clContext, cl_program & clProgram, const Mode mode, const size_t worksizeMax, const size_t inverseSize, const size_t inverseMultiple, const cl_uchar clScoreQuit, const std::string & seedPublicKey, const std::string & seedPrivateKey)
 	: m_clContext(clContext)
-	, m_clProgram(clProgram)
-	, m_mode(mode)
-	, m_worksizeMax(worksizeMax)
-	, m_inverseSize(inverseSize)
-	, m_size(inverseSize*inverseMultiple)
-	, m_clScoreMax(mode.score)
-	, m_clScoreQuit(clScoreQuit)
-	, m_eventFinished(NULL)
-	, m_countPrint(0)
-	, m_publicKeyX(fromHex(seedPublicKey.substr(0, 64)))
-	, m_publicKeyY(fromHex(seedPublicKey.substr(64, 64)))
-	, m_seedPrivateKey(seedPrivateKey)
-{
+	  , m_clProgram(clProgram)
+	  , m_mode(mode)
+	  , m_worksizeMax(worksizeMax)
+	  , m_inverseSize(inverseSize)
+	  , m_size(inverseSize * inverseMultiple)
+	  , m_clScoreMax(mode.score)
+	  , m_clScoreQuit(clScoreQuit)
+	  , m_eventFinished(nullptr)
+	  , m_countPrint(0)
+	  , m_countRunning(0), m_sizeInitTotal(0), m_sizeInitDone(0), m_quit(false),
+	  m_publicKeyX(fromHex(seedPublicKey.substr(0, 64)))
+	  , m_publicKeyY(fromHex(seedPublicKey.substr(64, 64)))
+	  , m_seedPrivateKey(seedPrivateKey) {
 }
 
-Dispatcher::~Dispatcher() {
-
-}
+Dispatcher::~Dispatcher() = default;
 
 void Dispatcher::addDevice(cl_device_id clDeviceId, const size_t worksizeLocal, const size_t index) {
-	Device * pDevice = new Device(*this, m_clContext, m_clProgram, clDeviceId, worksizeLocal, m_size, index, m_mode, m_publicKeyX, m_publicKeyY);
+	auto * pDevice = new Device(*this, m_clContext, m_clProgram, clDeviceId, worksizeLocal, m_size, index, m_mode, m_publicKeyX, m_publicKeyY);
 	m_vDevices.push_back(pDevice);
 }
 
@@ -484,13 +482,13 @@ void Dispatcher::run() {
 	std::cout << "  improve overall performance." << std::endl;
 	std::cout << std::endl;
 
-	for (auto it = m_vDevices.begin(); it != m_vDevices.end(); ++it) {
-		dispatch(*(*it));
+	for (const auto & m_vDevice : m_vDevices) {
+		dispatch(*m_vDevice);
 	}
 
 	clWaitForEvents(1, &m_eventFinished);
 	clReleaseEvent(m_eventFinished);
-	m_eventFinished = NULL;
+	m_eventFinished = nullptr;
 }
 
 void Dispatcher::init() {
