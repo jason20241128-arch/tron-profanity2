@@ -211,20 +211,6 @@ static cl_ulong4 fromHex(const std::string & strHex) {
 	return res;
 }
 
-static std::string toHex(const uint8_t * const s, const size_t len) {
-	std::string b("0123456789abcdef");
-	std::string r;
-
-	for (size_t i = 0; i < len; ++i) {
-		const unsigned char h = s[i] / 16;
-		const unsigned char l = s[i] % 16;
-
-		r = r + b.substr(h, 1) + b.substr(l, 1);
-	}
-
-	return r;
-}
-
 // Add two hex private keys (without 0x prefix), return result mod N (secp256k1 curve order)
 static std::string addPrivateKeys(const std::string& keyA, const std::string& keyB) {
 	// secp256k1 curve order N
@@ -319,10 +305,9 @@ static void saveToFile(const std::string& address, const std::string& privateKey
 }
 
 static void printResult(cl_ulong4 seed, cl_ulong round, result r, cl_uchar score, const std::chrono::time_point<std::chrono::steady_clock> & timeStart, const Mode & mode, const std::string & seedPrivateKey = "") {
-	// Time delta
 	const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - timeStart).count();
 
-	// Format private key
+	// Format private key offset
 	cl_ulong carry = 0;
 	cl_ulong4 seedRes;
 
@@ -336,37 +321,23 @@ static void printResult(cl_ulong4 seed, cl_ulong round, result r, cl_uchar score
 	ss << std::setw(16) << seedRes.s[3] << std::setw(16) << seedRes.s[2] << std::setw(16) << seedRes.s[1] << std::setw(16) << seedRes.s[0];
 	const std::string strPrivate = ss.str();
 
-	// Format public key (hex format for Ethereum compatibility)
-	const std::string strPublicHex = toHex(r.foundHash, 20);
-
-	// Check if this is a TRON mode (starts with "tron-")
-	bool isTronMode = (mode.name.find("tron-") == 0);
-
-	std::string strAddress;
-	if (isTronMode) {
-		// TRON address: 0x41 prefix + 20-byte hash, then Base58Check encode
-		uint8_t tronAddr[21];
-		tronAddr[0] = 0x41;
-		for (int i = 0; i < 20; i++) {
-			tronAddr[i + 1] = r.foundHash[i];
-		}
-		strAddress = toBase58Check(tronAddr);
-	} else {
-		// Ethereum address format
-		strAddress = "0x" + strPublicHex;
+	// Generate TRON address (Base58Check encoding)
+	uint8_t tronAddr[21];
+	tronAddr[0] = 0x41;
+	for (int i = 0; i < 20; i++) {
+		tronAddr[i + 1] = r.foundHash[i];
 	}
+	std::string strAddress = toBase58Check(tronAddr);
 
-	// Print
+	// Print result
 	const std::string strVT100ClearLine = "\33[2K\r";
-	std::cout << strVT100ClearLine << "  Time: " << std::setw(5) << seconds << "s Score: " << std::setw(2) << (int) score << " Private: 0x" << strPrivate << ' ';
+	std::cout << strVT100ClearLine << "  时间: " << std::setw(5) << seconds << "s 分数: " << std::setw(2) << (int)score
+	          << " 地址: " << strAddress << std::endl;
 
-	std::cout << mode.transformName();
-	std::cout << ": " << strAddress << std::endl;
-
-	// Calculate final private key and save to file if seed private key is provided
+	// Calculate final private key and save to file
 	if (!seedPrivateKey.empty()) {
 		std::string finalPrivateKey = addPrivateKeys(seedPrivateKey, strPrivate);
-		std::cout << "  Final Private Key: 0x" << finalPrivateKey << std::endl;
+		std::cout << "  私钥: 0x" << finalPrivateKey << std::endl;
 		saveToFile(strAddress, "0x" + finalPrivateKey);
 	}
 }
@@ -393,11 +364,10 @@ void Dispatcher::OpenCLException::OpenCLException::throwIfError(const std::strin
 }
 
 cl_command_queue Dispatcher::Device::createQueue(cl_context & clContext, cl_device_id & clDeviceId) {
-	// nVidia CUDA Toolkit 10.1 only supports OpenCL 1.2 so we revert back to older functions for compatability
 #ifdef PROFANITY_DEBUG
 	cl_command_queue_properties p = CL_QUEUE_PROFILING_ENABLE;
 #else
-	cl_command_queue_properties p = NULL;
+	cl_command_queue_properties p = 0;
 #endif
 
 #ifdef CL_VERSION_2_0
@@ -442,11 +412,10 @@ Dispatcher::Device::Device(Dispatcher & parent, cl_context & clContext, cl_progr
 	m_clDeviceId(clDeviceId),
 	m_worksizeLocal(worksizeLocal),
 	m_clScoreMax(0),
-	m_clQueue(createQueue(clContext, clDeviceId) ),
-	m_kernelInit( createKernel(clProgram, "profanity_init") ),
+	m_clQueue(createQueue(clContext, clDeviceId)),
+	m_kernelInit(createKernel(clProgram, "profanity_init")),
 	m_kernelInverse(createKernel(clProgram, "profanity_inverse")),
 	m_kernelIterate(createKernel(clProgram, "profanity_iterate")),
-	m_kernelTransform( mode.transformKernel() == "" ? NULL : createKernel(clProgram, mode.transformKernel())),
 	m_kernelScore(createKernel(clProgram, mode.kernel)),
 	m_memPrecomp(clContext, m_clQueue, CL_MEM_READ_ONLY | CL_MEM_HOST_WRITE_ONLY, sizeof(g_precomp), g_precomp),
 	m_memPointsDeltaX(clContext, m_clQueue, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, size, true),
@@ -586,10 +555,6 @@ void Dispatcher::initBegin(Device & d) {
 	d.m_memInversedNegativeDoubleGy.setKernelArg(d.m_kernelIterate, 1);
 	d.m_memPrevLambda.setKernelArg(d.m_kernelIterate, 2);
 
-	// Kernel arguments - profanity_transform_*
-	if(d.m_kernelTransform) {
-		d.m_memInversedNegativeDoubleGy.setKernelArg(d.m_kernelTransform, 0);
-	}
 
 	// Kernel arguments - profanity_score_*
 	d.m_memInversedNegativeDoubleGy.setKernelArg(d.m_kernelScore, 0);
@@ -684,18 +649,11 @@ void Dispatcher::dispatch(Device & d) {
 	enqueueKernelDevice(d, d.m_kernelIterate, m_size);
 #endif
 
-	if (d.m_kernelTransform) {
-		enqueueKernelDevice(d, d.m_kernelTransform, m_size);
-	}
-
 	enqueueKernelDevice(d, d.m_kernelScore, m_size);
 	clFlush(d.m_clQueue);
 
 #ifdef PROFANITY_DEBUG
-	// We're actually not allowed to call clFinish here because this function is ultimately asynchronously called by OpenCL.
-	// However, this happens to work on my computer and it's not really intended for release, just something to aid me in
-	// optimizations.
-	clFinish(d.m_clQueue); 
+	clFinish(d.m_clQueue);
 	std::cout << "Timing: profanity_inverse = " << getKernelExecutionTimeMicros(eventInverse) << "us, profanity_iterate = " << getKernelExecutionTimeMicros(eventIterate) << "us" << std::endl;
 #endif
 
@@ -760,19 +718,17 @@ void Dispatcher::onEvent(cl_event event, cl_int status, Device & d) {
 // This is run when m_mutex is held.
 void Dispatcher::printSpeed() {
 	++m_countPrint;
-	if( m_countPrint > m_vDevices.size() ) {
+	if (m_countPrint > m_vDevices.size()) {
 		std::string strGPUs;
 		double speedTotal = 0;
-		unsigned int i = 0;
 		for (auto & e : m_vDevices) {
 			const auto curSpeed = e->m_speed.getSpeed();
 			speedTotal += curSpeed;
 			strGPUs += " GPU" + toString(e->m_index) + ": " + formatSpeed(curSpeed);
-			++i;
 		}
 
 		const std::string strVT100ClearLine = "\33[2K\r";
-		std::cerr << strVT100ClearLine << "Total: " << formatSpeed(speedTotal) << " -" << strGPUs << '\r' << std::flush;
+		std::cerr << strVT100ClearLine << "速度: " << formatSpeed(speedTotal) << " -" << strGPUs << '\r' << std::flush;
 		m_countPrint = 0;
 	}
 }

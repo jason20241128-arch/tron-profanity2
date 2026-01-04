@@ -4,112 +4,62 @@
 #include <string>
 
 const std::string g_strHelp = R"(
-usage: ./profanity2 [OPTIONS]
+TRON Vanity Address Generator (TRON 靓号生成器)
+================================================
 
-  Optional args:
-    -z                      Seed public key to use. If not provided, a new
-                            key pair will be automatically generated.
+Usage: ./tron-vanity [OPTIONS]
 
-  TRON Vanity Address Modes (靓号模式):
-    -R, --tron-repeat       豹子号: Score on trailing repeated characters
-                            (e.g., ...AAAA, ...8888, ...aaaa)
-    -S, --tron-sequential   顺子号: Score on trailing sequential characters
-                            (e.g., ...12345, ...54321, ...abcde)
-    -T, --tron-suffix <str> 自定义后缀: Match custom suffix pattern(s)
-                            Use 'X' as wildcard, comma to separate patterns
-                            (e.g., 5211314, 888XXX, or 888,999,666)
-    -L, --tron-lucky        谐音靓号: Match Chinese lucky number patterns
-                            (5211314, 1314521, 168888, 888888, 666666, etc.)
+TRON 靓号模式 (必选其一):
+  -R, --tron-repeat       豹子号: 末尾重复字符
+                          例如: ...AAAA, ...8888, ...aaaa
+  -S, --tron-sequential   顺子号: 末尾连续递增/递减字符
+                          例如: ...12345, ...54321, ...abcde
+  -T, --tron-suffix <str> 自定义后缀: 匹配指定后缀
+                          支持 'X' 作为通配符, 逗号分隔多个后缀
+                          例如: 888, 5211314, 888XXX, 888,999,666
+  -L, --tron-lucky        谐音靓号: 匹配中国吉祥数字
+                          例如: 5211314, 1314521, 168888, 888888, 666666
 
-  Basic modes (Ethereum):
-    --benchmark             Run without any scoring, a benchmark.
-    --zeros                 Score on zeros anywhere in hash.
-    --letters               Score on letters anywhere in hash.
-    --numbers               Score on numbers anywhere in hash.
-    --mirror                Score on mirroring from center.
-    --leading-doubles       Score on hashes leading with hexadecimal pairs
-    -b, --zero-bytes        Score on hashes containing the most zero bytes
+可选参数:
+  -h, --help              显示帮助信息
+  -z, --publicKey <key>   使用指定的种子公钥 (128位十六进制)
+                          若不提供则自动生成密钥对
 
-  Modes with arguments:
-    --leading <single hex>  Score on hashes leading with given hex character.
-    --matching <hex string> Score on hashes matching given hex string.
+设备控制:
+  -s, --skip <index>      跳过指定索引的GPU设备
+  -n, --no-cache          不加载预编译的OpenCL内核缓存
 
-  Advanced modes:
-    --contract              Instead of account address, score the contract
-                            address created by the account's zeroth transaction.
-    --leading-range         Scores on hashes leading with characters within
-                            given range.
-    --range                 Scores on hashes having characters within given
-                            range anywhere.
+性能调优:
+  -w, --work <size>       OpenCL 本地工作大小 [默认: 64]
+  -W, --work-max <size>   OpenCL 最大工作大小 [默认: -i * -I]
+  -i, --inverse-size      单个工作项计算的模逆数量 [默认: 255]
+  -I, --inverse-multiple  并行运行的工作项数量 [默认: 16384]
 
-  Range:
-    -m, --min <0-15>        Set range minimum (inclusive), 0 is '0' 15 is 'f'.
-    -M, --max <0-15>        Set range maximum (inclusive), 0 is '0' 15 is 'f'.
+使用示例:
+  # 豹子号 - 寻找末尾重复字符的地址
+  ./tron-vanity --tron-repeat
 
-  Device control:
-    -s, --skip <index>      Skip device given by index.
-    -n, --no-cache          Don't load cached pre-compiled version of kernel.
+  # 顺子号 - 寻找末尾连续字符的地址
+  ./tron-vanity --tron-sequential
 
-  Tweaking:
-    -w, --work <size>       Set OpenCL local work size. [default = 64]
-    -W, --work-max <size>   Set OpenCL maximum work size. [default = -i * -I]
-    -i, --inverse-size      Set size of modular inverses to calculate in one
-                            work item. [default = 255]
-    -I, --inverse-multiple  Set how many above work items will run in
-                            parallell. [default = 16384]
+  # 自定义后缀 - 寻找以 888 结尾的地址
+  ./tron-vanity --tron-suffix 888
 
-  TRON Examples (TRON 靓号示例):
-    # 豹子号 - 末尾重复字符 (e.g., ...8888)
-    ./profanity2 --tron-repeat
+  # 多个后缀 - 寻找以 888 或 999 或 666 结尾的地址
+  ./tron-vanity --tron-suffix 888,999,666
 
-    # 顺子号 - 末尾连续字符 (e.g., ...12345 or ...54321)
-    ./profanity2 --tron-sequential
+  # 谐音靓号 - 寻找包含吉祥数字的地址
+  ./tron-vanity --tron-lucky
 
-    # 自定义后缀 - 匹配特定后缀 (e.g., ...5211314)
-    ./profanity2 --tron-suffix 5211314
+  # 使用通配符 - 888 后面可以是任意3个字符
+  ./tron-vanity --tron-suffix 888XXX
 
-    # 自定义后缀带通配符 (e.g., ...888XXX matches ...888abc, ...888123)
-    ./profanity2 --tron-suffix 888XXX
+输出说明:
+  生成的地址会自动保存到 output/ 目录
+  文件名为地址, 内容为对应的私钥
 
-    # 多个自定义后缀 - 用逗号分隔 (匹配 888 或 999 或 666)
-    ./profanity2 --tron-suffix 888,999,666
-
-    # 谐音靓号 - 匹配中国吉祥数字
-    ./profanity2 --tron-lucky
-
-    # 使用自己的公钥 (可选)
-    ./profanity2 --tron-repeat -z YOUR_128_CHAR_PUBLIC_KEY
-
-  Ethereum Examples:
-    ./profanity2 --leading f -z HEX_PUBLIC_KEY_128_CHARS_LONG
-    ./profanity2 --matching dead -z HEX_PUBLIC_KEY_128_CHARS_LONG
-    ./profanity2 --matching badXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXbad -z HEX_PUBLIC_KEY_128_CHARS_LONG
-    ./profanity2 --leading-range -m 0 -M 1 -z HEX_PUBLIC_KEY_128_CHARS_LONG
-    ./profanity2 --contract --leading 0 -z HEX_PUBLIC_KEY_128_CHARS_LONG
-
-  About:
-    profanity2 is a vanity address generator for Ethereum and TRON that
-    utilizes computing power from GPUs using OpenCL.
-
-  TRON Address Format:
-    TRON addresses use Base58Check encoding and start with 'T'.
-    The underlying cryptography (secp256k1 + Keccak-256) is the same as Ethereum.
-
-  Forked "profanity2":
-    Author: 1inch Network <info@1inch.io>
-    TRON Support: Added vanity address generation for TRON network
-    Disclaimer:
-      This project "profanity2" was forked from the original project and
-      modified to guarantee "SAFETY BY DESIGN". This means source code of
-      this project doesn't require any audits, but still guarantee safe usage.
-
-  From original "profanity":
-    Author: Johan Gustafsson <profanity@johgu.se>
-    Beer donations: 0x000dead000ae1c8e8ac27103e4ff65f42a4e9203
-    Disclaimer:
-      Always verify that a private key generated by this program corresponds to
-      the public key printed by importing it to a wallet of your choice. This
-      program like any software might contain bugs and it does by design cut
-      corners to improve overall performance.)";
+关于:
+  基于 profanity2 修改, 专门用于生成 TRON 网络靓号地址
+  使用 GPU OpenCL 加速计算)";
 
 #endif /* HPP_HELP */
