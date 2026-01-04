@@ -24,6 +24,7 @@
 #include "ArgParser.hpp"
 #include "Mode.hpp"
 #include "help.hpp"
+#include "KeyGenerator.hpp"
 
 std::string readFile(const char * const szFilename)
 {
@@ -171,6 +172,12 @@ int main(int argc, char * * argv) {
 		size_t inverseMultiple = 16384;
 		bool bMineContract = false;
 
+		// TRON mode flags
+		bool bModeTronRepeat = false;
+		bool bModeTronSequential = false;
+		std::string strModeTronSuffix;
+		bool bModeTronLucky = false;
+
 		argp.addSwitch('h', "help", bHelp);
 		argp.addSwitch('0', "benchmark", bModeBenchmark);
 		argp.addSwitch('1', "zeros", bModeZeros);
@@ -193,6 +200,12 @@ int main(int argc, char * * argv) {
 		argp.addSwitch('c', "contract", bMineContract);
 		argp.addSwitch('z', "publicKey", strPublicKey);
 		argp.addSwitch('b', "zero-bytes", bModeZeroBytes);
+
+		// TRON mode switches
+		argp.addSwitch('R', "tron-repeat", bModeTronRepeat);
+		argp.addSwitch('S', "tron-sequential", bModeTronSequential);
+		argp.addSwitch('T', "tron-suffix", strModeTronSuffix);
+		argp.addSwitch('L', "tron-lucky", bModeTronLucky);
 
 		if (!argp.parse()) {
 			std::cout << "error: bad arguments, try again :<" << std::endl;
@@ -227,14 +240,33 @@ int main(int argc, char * * argv) {
 			mode = Mode::doubles();
 		} else if (bModeZeroBytes) {
 			mode = Mode::zeroBytes();
+		} else if (bModeTronRepeat) {
+			mode = Mode::tronRepeat();
+		} else if (bModeTronSequential) {
+			mode = Mode::tronSequential();
+		} else if (!strModeTronSuffix.empty()) {
+			mode = Mode::tronSuffix(strModeTronSuffix);
+		} else if (bModeTronLucky) {
+			mode = Mode::tronLucky();
 		} else {
 			std::cout << g_strHelp << std::endl;
 			return 0;
 		}
 		
+		// Auto-generate key pair if public key not provided
+		std::string generatedPrivateKey;
 		if (strPublicKey.length() == 0) {
-			std::cout << "error: this tool requires your public key to derive it's private key security" << std::endl;
-			return 1;
+			std::cout << "No public key provided, generating new key pair..." << std::endl;
+			KeyGenerator keyGen;
+			keyGen.generate();
+			strPublicKey = keyGen.publicKey;
+			generatedPrivateKey = keyGen.privateKey;
+			std::cout << "Generated Seed Private Key: 0x" << generatedPrivateKey << std::endl;
+			std::cout << "Generated Seed Public Key:  " << strPublicKey << std::endl;
+			std::cout << std::endl;
+			std::cout << "IMPORTANT: Save the seed private key above! You will need to add it to the" << std::endl;
+			std::cout << "           result private key to get the final private key." << std::endl;
+			std::cout << std::endl;
 		}
 
 		if (strPublicKey.length() != 128) {
@@ -363,7 +395,7 @@ int main(int argc, char * * argv) {
 
 		std::cout << std::endl;
 
-		Dispatcher d(clContext, clProgram, mode, worksizeMax == 0 ? inverseSize * inverseMultiple : worksizeMax, inverseSize, inverseMultiple, 0, strPublicKey);
+		Dispatcher d(clContext, clProgram, mode, worksizeMax == 0 ? inverseSize * inverseMultiple : worksizeMax, inverseSize, inverseMultiple, 0, strPublicKey, generatedPrivateKey);
 		for (auto & i : vDevices) {
 			d.addDevice(i, worksizeLocal, mDeviceIndex[i]);
 		}

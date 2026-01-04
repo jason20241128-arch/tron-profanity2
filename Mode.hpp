@@ -33,6 +33,12 @@ class Mode {
 		static Mode numbers();
 		static Mode doubles();
 
+		// TRON vanity address modes
+		static Mode tronRepeat();                         // 豹子号
+		static Mode tronSequential();                     // 顺子号
+		static Mode tronSuffix(const std::string suffix); // 自定义后缀
+		static Mode tronLucky();                          // 谐音靓号
+
 		std::string name;
 
 		std::string kernel;

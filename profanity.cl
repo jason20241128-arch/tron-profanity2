@@ -869,3 +869,378 @@ __kernel void profanity_score_doubles(__global mp_number * const pInverse, __glo
 
 	profanity_result_update(id, hash, pResult, score, scoreMax);
 }
+
+/* ------------------------------------------------------------------------ */
+/* TRON Address Generation and Scoring                                       */
+/* ------------------------------------------------------------------------ */
+
+// Base58 alphabet
+__constant const char BASE58_ALPHABET[58] = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+// SHA256 constants
+__constant const uint SHA256_K[64] = {
+	0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+	0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+	0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+	0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+	0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+	0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+	0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+	0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+};
+
+#define SHA256_ROTR(x, n) (((x) >> (n)) | ((x) << (32 - (n))))
+#define SHA256_CH(x, y, z) (((x) & (y)) ^ (~(x) & (z)))
+#define SHA256_MAJ(x, y, z) (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
+#define SHA256_EP0(x) (SHA256_ROTR(x, 2) ^ SHA256_ROTR(x, 13) ^ SHA256_ROTR(x, 22))
+#define SHA256_EP1(x) (SHA256_ROTR(x, 6) ^ SHA256_ROTR(x, 11) ^ SHA256_ROTR(x, 25))
+#define SHA256_SIG0(x) (SHA256_ROTR(x, 7) ^ SHA256_ROTR(x, 18) ^ ((x) >> 3))
+#define SHA256_SIG1(x) (SHA256_ROTR(x, 17) ^ SHA256_ROTR(x, 19) ^ ((x) >> 10))
+
+// SHA256 for small inputs (up to 55 bytes, single block after padding)
+void sha256_small(const uchar * data, int len, uchar * hash) {
+	uint state[8] = {
+		0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+		0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+	};
+
+	// Prepare block with padding
+	uchar block[64];
+	for (int i = 0; i < 64; ++i) block[i] = 0;
+	for (int i = 0; i < len; ++i) block[i] = data[i];
+	block[len] = 0x80;
+
+	// Length in bits (big endian) at the end
+	ulong bits = (ulong)len * 8;
+	block[63] = bits & 0xff;
+	block[62] = (bits >> 8) & 0xff;
+	block[61] = (bits >> 16) & 0xff;
+	block[60] = (bits >> 24) & 0xff;
+	block[59] = (bits >> 32) & 0xff;
+	block[58] = (bits >> 40) & 0xff;
+	block[57] = (bits >> 48) & 0xff;
+	block[56] = (bits >> 56) & 0xff;
+
+	// Process block
+	uint w[64];
+	for (int i = 0; i < 16; ++i) {
+		w[i] = ((uint)block[i * 4] << 24) | ((uint)block[i * 4 + 1] << 16) |
+		       ((uint)block[i * 4 + 2] << 8) | ((uint)block[i * 4 + 3]);
+	}
+	for (int i = 16; i < 64; ++i) {
+		w[i] = SHA256_SIG1(w[i - 2]) + w[i - 7] + SHA256_SIG0(w[i - 15]) + w[i - 16];
+	}
+
+	uint a = state[0], b = state[1], c = state[2], d = state[3];
+	uint e = state[4], f = state[5], g = state[6], h = state[7];
+
+	for (int i = 0; i < 64; ++i) {
+		uint t1 = h + SHA256_EP1(e) + SHA256_CH(e, f, g) + SHA256_K[i] + w[i];
+		uint t2 = SHA256_EP0(a) + SHA256_MAJ(a, b, c);
+		h = g; g = f; f = e; e = d + t1;
+		d = c; c = b; b = a; a = t1 + t2;
+	}
+
+	state[0] += a; state[1] += b; state[2] += c; state[3] += d;
+	state[4] += e; state[5] += f; state[6] += g; state[7] += h;
+
+	// Output hash
+	for (int i = 0; i < 8; ++i) {
+		hash[i * 4] = (state[i] >> 24) & 0xff;
+		hash[i * 4 + 1] = (state[i] >> 16) & 0xff;
+		hash[i * 4 + 2] = (state[i] >> 8) & 0xff;
+		hash[i * 4 + 3] = state[i] & 0xff;
+	}
+}
+
+// Convert 21-byte TRON address (0x41 + 20-byte hash) to Base58Check
+// Returns the length of encoded string, stores result in 'out' (max 34 chars for TRON)
+int tron_base58_encode(const uchar * const input21, char * out) {
+	// Calculate checksum: double SHA256
+	uchar hash1[32], hash2[32];
+	sha256_small(input21, 21, hash1);
+	sha256_small(hash1, 32, hash2);
+
+	// Create 25-byte data: 21 bytes + 4 byte checksum
+	uchar data25[25];
+	for (int i = 0; i < 21; ++i) data25[i] = input21[i];
+	for (int i = 0; i < 4; ++i) data25[21 + i] = hash2[i];
+
+	// Work with a copy as a big integer (using 32-bit words)
+	// 25 bytes = 200 bits, need 7 * 32 = 224 bits
+	uint num[7];
+	num[0] = ((uint)data25[21] << 24) | ((uint)data25[22] << 16) | ((uint)data25[23] << 8) | (uint)data25[24];
+	num[1] = ((uint)data25[17] << 24) | ((uint)data25[18] << 16) | ((uint)data25[19] << 8) | (uint)data25[20];
+	num[2] = ((uint)data25[13] << 24) | ((uint)data25[14] << 16) | ((uint)data25[15] << 8) | (uint)data25[16];
+	num[3] = ((uint)data25[9] << 24) | ((uint)data25[10] << 16) | ((uint)data25[11] << 8) | (uint)data25[12];
+	num[4] = ((uint)data25[5] << 24) | ((uint)data25[6] << 16) | ((uint)data25[7] << 8) | (uint)data25[8];
+	num[5] = ((uint)data25[1] << 24) | ((uint)data25[2] << 16) | ((uint)data25[3] << 8) | (uint)data25[4];
+	num[6] = (uint)data25[0]; // 0x41 prefix
+
+	char temp[35];
+	int len = 0;
+
+	// Convert to base58 by repeatedly dividing by 58
+	while (num[6] || num[5] || num[4] || num[3] || num[2] || num[1] || num[0]) {
+		ulong remainder = 0;
+		for (int i = 6; i >= 0; --i) {
+			ulong value = (remainder << 32) | num[i];
+			num[i] = (uint)(value / 58);
+			remainder = value % 58;
+		}
+		temp[len++] = BASE58_ALPHABET[remainder];
+	}
+
+	// Add leading '1's for leading zero bytes
+	int leadingZeros = 0;
+	for (int i = 0; i < 25 && data25[i] == 0; ++i) {
+		leadingZeros++;
+	}
+	for (int i = 0; i < leadingZeros; ++i) {
+		temp[len++] = '1';
+	}
+
+	// Reverse the result
+	for (int i = 0; i < len; ++i) {
+		out[i] = temp[len - 1 - i];
+	}
+	out[len] = 0;
+
+	return len;
+}
+
+// 豹子号 (Leopard number): Score on trailing repeated characters
+// data1[0] = minimum required repeat count
+__kernel void profanity_score_tron_repeat(__global mp_number * const pInverse, __global result * const pResult, __constant const uchar * const data1, __constant const uchar * const data2, const uchar scoreMax) {
+	const size_t id = get_global_id(0);
+	__global const uchar * const hash = pInverse[id].d;
+
+	// Build TRON address: 0x41 prefix + 20 bytes hash
+	uchar tronAddr[21];
+	tronAddr[0] = 0x41;
+	for (int i = 0; i < 20; ++i) {
+		tronAddr[i + 1] = hash[i];
+	}
+
+	// Encode to Base58
+	char base58[35];
+	int len = tron_base58_encode(tronAddr, base58);
+
+	// Count trailing repeated characters
+	int score = 1;
+	if (len >= 2) {
+		char lastChar = base58[len - 1];
+		for (int i = len - 2; i >= 0; --i) {
+			if (base58[i] == lastChar) {
+				score++;
+			} else {
+				break;
+			}
+		}
+	}
+
+	profanity_result_update(id, hash, pResult, score, scoreMax);
+}
+
+// 顺子号 (Sequential number): Score on trailing sequential characters (ascending or descending)
+// Supports sequences like: 123456, 654321, abcdef, fedcba
+__kernel void profanity_score_tron_sequential(__global mp_number * const pInverse, __global result * const pResult, __constant const uchar * const data1, __constant const uchar * const data2, const uchar scoreMax) {
+	const size_t id = get_global_id(0);
+	__global const uchar * const hash = pInverse[id].d;
+
+	// Build TRON address
+	uchar tronAddr[21];
+	tronAddr[0] = 0x41;
+	for (int i = 0; i < 20; ++i) {
+		tronAddr[i + 1] = hash[i];
+	}
+
+	// Encode to Base58
+	char base58[35];
+	int len = tron_base58_encode(tronAddr, base58);
+
+	if (len < 2) {
+		profanity_result_update(id, hash, pResult, 0, scoreMax);
+		return;
+	}
+
+	// Check for ascending sequence from the end
+	int ascScore = 1;
+	for (int i = len - 2; i >= 0; --i) {
+		if (base58[i] + 1 == base58[i + 1]) {
+			ascScore++;
+		} else {
+			break;
+		}
+	}
+
+	// Check for descending sequence from the end
+	int descScore = 1;
+	for (int i = len - 2; i >= 0; --i) {
+		if (base58[i] - 1 == base58[i + 1]) {
+			descScore++;
+		} else {
+			break;
+		}
+	}
+
+	int score = ascScore > descScore ? ascScore : descScore;
+
+	profanity_result_update(id, hash, pResult, score, scoreMax);
+}
+
+// 谐音靓号/自定义后缀 (Custom suffix matching)
+// Supports multiple patterns separated by null bytes
+// data1 = pattern bytes (patterns separated by 0x00, max total 20 bytes)
+// data2[0] = total length of all patterns including separators
+// data2[1] = number of patterns
+// Uses 'X' or 'x' as wildcard
+__kernel void profanity_score_tron_suffix(__global mp_number * const pInverse, __global result * const pResult, __constant const uchar * const data1, __constant const uchar * const data2, const uchar scoreMax) {
+	const size_t id = get_global_id(0);
+	__global const uchar * const hash = pInverse[id].d;
+
+	// Build TRON address
+	uchar tronAddr[21];
+	tronAddr[0] = 0x41;
+	for (int i = 0; i < 20; ++i) {
+		tronAddr[i + 1] = hash[i];
+	}
+
+	// Encode to Base58
+	char base58[35];
+	int addrLen = tron_base58_encode(tronAddr, base58);
+
+	int totalDataLen = data2[0];
+	int numPatterns = data2[1];
+
+	if (numPatterns == 0 || totalDataLen == 0) {
+		profanity_result_update(id, hash, pResult, 0, scoreMax);
+		return;
+	}
+
+	int bestScore = 0;
+	int patternStart = 0;
+
+	// Try each pattern
+	for (int p = 0; p < numPatterns && patternStart < totalDataLen; ++p) {
+		// Find pattern length (until next 0x00 or end)
+		int patternLen = 0;
+		for (int i = patternStart; i < totalDataLen && data1[i] != 0; ++i) {
+			patternLen++;
+		}
+
+		if (patternLen > 0 && patternLen <= addrLen) {
+			// Match pattern from the end of address
+			int score = 0;
+			int startPos = addrLen - patternLen;
+			bool fullMatch = true;
+
+			for (int i = 0; i < patternLen; ++i) {
+				char patternChar = data1[patternStart + i];
+				char addrChar = base58[startPos + i];
+
+				// 'X' or 'x' is wildcard
+				if (patternChar == 'X' || patternChar == 'x') {
+					score++;
+				} else if (patternChar == addrChar) {
+					score++;
+				} else {
+					fullMatch = false;
+					break;
+				}
+			}
+
+			// Only count if all pattern characters match
+			if (fullMatch && score > bestScore) {
+				bestScore = score;
+			}
+		}
+
+		// Move to next pattern (skip current pattern + null separator)
+		patternStart += patternLen + 1;
+	}
+
+	profanity_result_update(id, hash, pResult, bestScore, scoreMax);
+}
+
+// 多种谐音靓号模式匹配 (Multiple pattern matching for Chinese lucky numbers)
+// Matches patterns like: 5211314, 1314521, 168888, 888888, etc.
+// data1[0] = number of patterns
+// Patterns are pre-defined lucky number combinations
+__kernel void profanity_score_tron_lucky(__global mp_number * const pInverse, __global result * const pResult, __constant const uchar * const data1, __constant const uchar * const data2, const uchar scoreMax) {
+	const size_t id = get_global_id(0);
+	__global const uchar * const hash = pInverse[id].d;
+
+	// Build TRON address
+	uchar tronAddr[21];
+	tronAddr[0] = 0x41;
+	for (int i = 0; i < 20; ++i) {
+		tronAddr[i + 1] = hash[i];
+	}
+
+	// Encode to Base58
+	char base58[35];
+	int len = tron_base58_encode(tronAddr, base58);
+
+	int score = 0;
+
+	// Check for lucky patterns at the end
+	// Pattern 1: 5211314 (我爱你一生一世) - 7 chars
+	if (len >= 7) {
+		if (base58[len-7] == '5' && base58[len-6] == '2' && base58[len-5] == '1' &&
+		    base58[len-4] == '1' && base58[len-3] == '3' && base58[len-2] == '1' && base58[len-1] == '4') {
+			score = 7;
+		}
+	}
+
+	// Pattern 2: 1314521 (一生一世我爱你)
+	if (len >= 7 && score < 7) {
+		if (base58[len-7] == '1' && base58[len-6] == '3' && base58[len-5] == '1' &&
+		    base58[len-4] == '4' && base58[len-3] == '5' && base58[len-2] == '2' && base58[len-1] == '1') {
+			score = 7;
+		}
+	}
+
+	// Pattern 3: 168888 (一路发发发发) - 6 chars
+	if (len >= 6 && score < 6) {
+		if (base58[len-6] == '1' && base58[len-5] == '6' &&
+		    base58[len-4] == '8' && base58[len-3] == '8' && base58[len-2] == '8' && base58[len-1] == '8') {
+			score = 6;
+		}
+	}
+
+	// Pattern 4: 888888 - 6 chars
+	if (len >= 6 && score < 6) {
+		bool all8 = true;
+		for (int i = 1; i <= 6; ++i) {
+			if (base58[len-i] != '8') all8 = false;
+		}
+		if (all8) score = 6;
+	}
+
+	// Pattern 5: 666666 - 6 chars
+	if (len >= 6 && score < 6) {
+		bool all6 = true;
+		for (int i = 1; i <= 6; ++i) {
+			if (base58[len-i] != '6') all6 = false;
+		}
+		if (all6) score = 6;
+	}
+
+	// Pattern 6: 520 (我爱你) - 3 chars
+	if (len >= 3 && score < 3) {
+		if (base58[len-3] == '5' && base58[len-2] == '2' && base58[len-1] == '0') {
+			score = 3;
+		}
+	}
+
+	// Pattern 7: 1314 (一生一世) - 4 chars
+	if (len >= 4 && score < 4) {
+		if (base58[len-4] == '1' && base58[len-3] == '3' && base58[len-2] == '1' && base58[len-1] == '4') {
+			score = 4;
+		}
+	}
+
+	profanity_result_update(id, hash, pResult, score, scoreMax);
+}
+

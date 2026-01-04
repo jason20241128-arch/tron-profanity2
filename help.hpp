@@ -6,11 +6,22 @@
 const std::string g_strHelp = R"(
 usage: ./profanity2 [OPTIONS]
 
-  Mandatory args:
-    -z                      Seed public key to start, add it's private key
-                            to the "profanity2" resulting private key.
+  Optional args:
+    -z                      Seed public key to use. If not provided, a new
+                            key pair will be automatically generated.
 
-  Basic modes:
+  TRON Vanity Address Modes (靓号模式):
+    -R, --tron-repeat       豹子号: Score on trailing repeated characters
+                            (e.g., ...AAAA, ...8888, ...aaaa)
+    -S, --tron-sequential   顺子号: Score on trailing sequential characters
+                            (e.g., ...12345, ...54321, ...abcde)
+    -T, --tron-suffix <str> 自定义后缀: Match custom suffix pattern(s)
+                            Use 'X' as wildcard, comma to separate patterns
+                            (e.g., 5211314, 888XXX, or 888,999,666)
+    -L, --tron-lucky        谐音靓号: Match Chinese lucky number patterns
+                            (5211314, 1314521, 168888, 888888, 666666, etc.)
+
+  Basic modes (Ethereum):
     --benchmark             Run without any scoring, a benchmark.
     --zeros                 Score on zeros anywhere in hash.
     --letters               Score on letters anywhere in hash.
@@ -47,21 +58,46 @@ usage: ./profanity2 [OPTIONS]
     -I, --inverse-multiple  Set how many above work items will run in
                             parallell. [default = 16384]
 
-  Examples:
+  TRON Examples (TRON 靓号示例):
+    # 豹子号 - 末尾重复字符 (e.g., ...8888)
+    ./profanity2 --tron-repeat
+
+    # 顺子号 - 末尾连续字符 (e.g., ...12345 or ...54321)
+    ./profanity2 --tron-sequential
+
+    # 自定义后缀 - 匹配特定后缀 (e.g., ...5211314)
+    ./profanity2 --tron-suffix 5211314
+
+    # 自定义后缀带通配符 (e.g., ...888XXX matches ...888abc, ...888123)
+    ./profanity2 --tron-suffix 888XXX
+
+    # 多个自定义后缀 - 用逗号分隔 (匹配 888 或 999 或 666)
+    ./profanity2 --tron-suffix 888,999,666
+
+    # 谐音靓号 - 匹配中国吉祥数字
+    ./profanity2 --tron-lucky
+
+    # 使用自己的公钥 (可选)
+    ./profanity2 --tron-repeat -z YOUR_128_CHAR_PUBLIC_KEY
+
+  Ethereum Examples:
     ./profanity2 --leading f -z HEX_PUBLIC_KEY_128_CHARS_LONG
     ./profanity2 --matching dead -z HEX_PUBLIC_KEY_128_CHARS_LONG
     ./profanity2 --matching badXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXbad -z HEX_PUBLIC_KEY_128_CHARS_LONG
     ./profanity2 --leading-range -m 0 -M 1 -z HEX_PUBLIC_KEY_128_CHARS_LONG
-    ./profanity2 --leading-range -m 10 -M 12 -z HEX_PUBLIC_KEY_128_CHARS_LONG
-    ./profanity2 --range -m 0 -M 1 -z HEX_PUBLIC_KEY_128_CHARS_LONG
     ./profanity2 --contract --leading 0 -z HEX_PUBLIC_KEY_128_CHARS_LONG
 
   About:
-    profanity2 is a vanity address generator for Ethereum that utilizes
-    computing power from GPUs using OpenCL.
+    profanity2 is a vanity address generator for Ethereum and TRON that
+    utilizes computing power from GPUs using OpenCL.
+
+  TRON Address Format:
+    TRON addresses use Base58Check encoding and start with 'T'.
+    The underlying cryptography (secp256k1 + Keccak-256) is the same as Ethereum.
 
   Forked "profanity2":
     Author: 1inch Network <info@1inch.io>
+    TRON Support: Added vanity address generation for TRON network
     Disclaimer:
       This project "profanity2" was forked from the original project and
       modified to guarantee "SAFETY BY DESIGN". This means source code of

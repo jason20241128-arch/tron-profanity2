@@ -3,3 +3,6 @@
 *.so
 cache-opencl.*
 bin
+.idea
+output
+tron-vanity

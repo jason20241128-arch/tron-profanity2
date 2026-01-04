@@ -9,6 +9,7 @@
 #include <random>
 #include <thread>
 #include <algorithm>
+#include <cstring>
 
 #if defined(__APPLE__) || defined(__MACOSX)
 #include <machine/endian.h>
@@ -21,6 +22,157 @@
 #ifndef htonll
 #define htonll(x) ((((uint64_t)htonl(x)) << 32) | htonl((x) >> 32))
 #endif
+
+// Base58 alphabet
+static const char* BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+// SHA256 implementation for checksum
+static void sha256_transform(uint32_t state[8], const uint8_t data[64]) {
+	static const uint32_t k[64] = {
+		0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+		0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+		0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+		0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+		0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+		0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+		0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+		0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+	};
+
+	#define ROTR(x, n) (((x) >> (n)) | ((x) << (32 - (n))))
+	#define CH(x, y, z) (((x) & (y)) ^ (~(x) & (z)))
+	#define MAJ(x, y, z) (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
+	#define EP0(x) (ROTR(x, 2) ^ ROTR(x, 13) ^ ROTR(x, 22))
+	#define EP1(x) (ROTR(x, 6) ^ ROTR(x, 11) ^ ROTR(x, 25))
+	#define SIG0(x) (ROTR(x, 7) ^ ROTR(x, 18) ^ ((x) >> 3))
+	#define SIG1(x) (ROTR(x, 17) ^ ROTR(x, 19) ^ ((x) >> 10))
+
+	uint32_t w[64];
+	for (int i = 0; i < 16; i++) {
+		w[i] = ((uint32_t)data[i * 4] << 24) | ((uint32_t)data[i * 4 + 1] << 16) |
+		       ((uint32_t)data[i * 4 + 2] << 8) | ((uint32_t)data[i * 4 + 3]);
+	}
+	for (int i = 16; i < 64; i++) {
+		w[i] = SIG1(w[i - 2]) + w[i - 7] + SIG0(w[i - 15]) + w[i - 16];
+	}
+
+	uint32_t a = state[0], b = state[1], c = state[2], d = state[3];
+	uint32_t e = state[4], f = state[5], g = state[6], h = state[7];
+
+	for (int i = 0; i < 64; i++) {
+		uint32_t t1 = h + EP1(e) + CH(e, f, g) + k[i] + w[i];
+		uint32_t t2 = EP0(a) + MAJ(a, b, c);
+		h = g; g = f; f = e; e = d + t1;
+		d = c; c = b; b = a; a = t1 + t2;
+	}
+
+	state[0] += a; state[1] += b; state[2] += c; state[3] += d;
+	state[4] += e; state[5] += f; state[6] += g; state[7] += h;
+
+	#undef ROTR
+	#undef CH
+	#undef MAJ
+	#undef EP0
+	#undef EP1
+	#undef SIG0
+	#undef SIG1
+}
+
+static void sha256(const uint8_t* data, size_t len, uint8_t hash[32]) {
+	uint32_t state[8] = {
+		0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+		0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+	};
+
+	uint8_t block[64];
+	size_t i = 0;
+
+	while (len >= 64) {
+		sha256_transform(state, data + i);
+		i += 64;
+		len -= 64;
+	}
+
+	memset(block, 0, 64);
+	memcpy(block, data + i, len);
+	block[len] = 0x80;
+
+	if (len >= 56) {
+		sha256_transform(state, block);
+		memset(block, 0, 64);
+	}
+
+	uint64_t bits = (i + len) * 8;
+	block[63] = bits & 0xff;
+	block[62] = (bits >> 8) & 0xff;
+	block[61] = (bits >> 16) & 0xff;
+	block[60] = (bits >> 24) & 0xff;
+	block[59] = (bits >> 32) & 0xff;
+	block[58] = (bits >> 40) & 0xff;
+	block[57] = (bits >> 48) & 0xff;
+	block[56] = (bits >> 56) & 0xff;
+
+	sha256_transform(state, block);
+
+	for (int j = 0; j < 8; j++) {
+		hash[j * 4] = (state[j] >> 24) & 0xff;
+		hash[j * 4 + 1] = (state[j] >> 16) & 0xff;
+		hash[j * 4 + 2] = (state[j] >> 8) & 0xff;
+		hash[j * 4 + 3] = state[j] & 0xff;
+	}
+}
+
+// Base58Check encode for TRON address
+static std::string toBase58Check(const uint8_t* data21) {
+	// Double SHA256 for checksum
+	uint8_t hash1[32], hash2[32];
+	sha256(data21, 21, hash1);
+	sha256(hash1, 32, hash2);
+
+	// Append 4-byte checksum
+	uint8_t data25[25];
+	memcpy(data25, data21, 21);
+	memcpy(data25 + 21, hash2, 4);
+
+	// Count leading zeros
+	int leadingZeros = 0;
+	for (int i = 0; i < 25 && data25[i] == 0; i++) {
+		leadingZeros++;
+	}
+
+	// Convert to base58
+	std::string result;
+
+	// Use big integer division
+	uint8_t temp[25];
+	memcpy(temp, data25, 25);
+
+	while (true) {
+		bool allZero = true;
+		for (int i = 0; i < 25; i++) {
+			if (temp[i] != 0) {
+				allZero = false;
+				break;
+			}
+		}
+		if (allZero) break;
+
+		int remainder = 0;
+		for (int i = 0; i < 25; i++) {
+			int value = remainder * 256 + temp[i];
+			temp[i] = value / 58;
+			remainder = value % 58;
+		}
+		result = BASE58_ALPHABET[remainder] + result;
+	}
+
+	// Add leading '1's
+	for (int i = 0; i < leadingZeros; i++) {
+		result = '1' + result;
+	}
+
+	return result;
+}
 
 static std::string::size_type fromHex(char c) {
 	if (c >= 'A' && c <= 'F') {
@@ -73,7 +225,100 @@ static std::string toHex(const uint8_t * const s, const size_t len) {
 	return r;
 }
 
-static void printResult(cl_ulong4 seed, cl_ulong round, result r, cl_uchar score, const std::chrono::time_point<std::chrono::steady_clock> & timeStart, const Mode & mode) {
+// Add two hex private keys (without 0x prefix), return result mod N (secp256k1 curve order)
+static std::string addPrivateKeys(const std::string& keyA, const std::string& keyB) {
+	// secp256k1 curve order N
+	static const char* N_HEX = "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141";
+
+	// Convert hex string to bytes
+	auto hexToBytes = [](const std::string& hex, uint8_t* bytes, size_t len) {
+		for (size_t i = 0; i < len && i * 2 < hex.size(); i++) {
+			char hi = hex[i * 2];
+			char lo = (i * 2 + 1 < hex.size()) ? hex[i * 2 + 1] : '0';
+			auto hexVal = [](char c) -> uint8_t {
+				if (c >= '0' && c <= '9') return c - '0';
+				if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+				if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+				return 0;
+			};
+			bytes[i] = (hexVal(hi) << 4) | hexVal(lo);
+		}
+	};
+
+	uint8_t a[32] = {0}, b[32] = {0}, n[32] = {0};
+	hexToBytes(keyA, a, 32);
+	hexToBytes(keyB, b, 32);
+	hexToBytes(N_HEX, n, 32);
+
+	// Add a + b
+	uint8_t sum[33] = {0};
+	uint16_t carry = 0;
+	for (int i = 31; i >= 0; i--) {
+		uint16_t s = (uint16_t)a[i] + (uint16_t)b[i] + carry;
+		sum[i + 1] = s & 0xFF;
+		carry = s >> 8;
+	}
+	sum[0] = carry;
+
+	// Compare sum with N
+	auto compare = [](const uint8_t* x, size_t xLen, const uint8_t* y, size_t yLen) -> int {
+		// Skip leading zeros
+		while (xLen > 0 && x[0] == 0) { x++; xLen--; }
+		while (yLen > 0 && y[0] == 0) { y++; yLen--; }
+		if (xLen != yLen) return (xLen > yLen) ? 1 : -1;
+		for (size_t i = 0; i < xLen; i++) {
+			if (x[i] != y[i]) return (x[i] > y[i]) ? 1 : -1;
+		}
+		return 0;
+	};
+
+	// If sum >= N, subtract N
+	uint8_t* result = sum + 1;  // Point to 32-byte result
+	if (compare(sum, 33, n, 32) >= 0) {
+		uint16_t borrow = 0;
+		for (int i = 31; i >= 0; i--) {
+			int16_t diff = (int16_t)sum[i + 1] - (int16_t)n[i] - borrow;
+			if (diff < 0) {
+				diff += 256;
+				borrow = 1;
+			} else {
+				borrow = 0;
+			}
+			result[i] = diff & 0xFF;
+		}
+	}
+
+	// Convert back to hex
+	std::ostringstream ss;
+	ss << std::hex << std::setfill('0');
+	for (int i = 0; i < 32; i++) {
+		ss << std::setw(2) << (int)result[i];
+	}
+	return ss.str();
+}
+
+// Save address and private key to file
+static void saveToFile(const std::string& address, const std::string& privateKey) {
+	// Create output directory if not exists
+	std::string outputDir = "output";
+	#if defined(__APPLE__) || defined(__MACOSX) || defined(__linux__)
+	system(("mkdir -p " + outputDir).c_str());
+	#else
+	system(("mkdir " + outputDir + " 2>nul").c_str());
+	#endif
+
+	std::string filename = outputDir + "/" + address + ".txt";
+	std::ofstream outFile(filename);
+	if (outFile.is_open()) {
+		outFile << privateKey << std::endl;
+		outFile.close();
+		std::cout << "  Saved to: " << filename << std::endl;
+	} else {
+		std::cerr << "  Error: Could not save to file: " << filename << std::endl;
+	}
+}
+
+static void printResult(cl_ulong4 seed, cl_ulong round, result r, cl_uchar score, const std::chrono::time_point<std::chrono::steady_clock> & timeStart, const Mode & mode, const std::string & seedPrivateKey = "") {
 	// Time delta
 	const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - timeStart).count();
 
@@ -91,15 +336,39 @@ static void printResult(cl_ulong4 seed, cl_ulong round, result r, cl_uchar score
 	ss << std::setw(16) << seedRes.s[3] << std::setw(16) << seedRes.s[2] << std::setw(16) << seedRes.s[1] << std::setw(16) << seedRes.s[0];
 	const std::string strPrivate = ss.str();
 
-	// Format public key
-	const std::string strPublic = toHex(r.foundHash, 20);
+	// Format public key (hex format for Ethereum compatibility)
+	const std::string strPublicHex = toHex(r.foundHash, 20);
+
+	// Check if this is a TRON mode (starts with "tron-")
+	bool isTronMode = (mode.name.find("tron-") == 0);
+
+	std::string strAddress;
+	if (isTronMode) {
+		// TRON address: 0x41 prefix + 20-byte hash, then Base58Check encode
+		uint8_t tronAddr[21];
+		tronAddr[0] = 0x41;
+		for (int i = 0; i < 20; i++) {
+			tronAddr[i + 1] = r.foundHash[i];
+		}
+		strAddress = toBase58Check(tronAddr);
+	} else {
+		// Ethereum address format
+		strAddress = "0x" + strPublicHex;
+	}
 
 	// Print
 	const std::string strVT100ClearLine = "\33[2K\r";
 	std::cout << strVT100ClearLine << "  Time: " << std::setw(5) << seconds << "s Score: " << std::setw(2) << (int) score << " Private: 0x" << strPrivate << ' ';
 
 	std::cout << mode.transformName();
-	std::cout << ": 0x" << strPublic << std::endl;
+	std::cout << ": " << strAddress << std::endl;
+
+	// Calculate final private key and save to file if seed private key is provided
+	if (!seedPrivateKey.empty()) {
+		std::string finalPrivateKey = addPrivateKeys(seedPrivateKey, strPrivate);
+		std::cout << "  Final Private Key: 0x" << finalPrivateKey << std::endl;
+		saveToFile(strAddress, "0x" + finalPrivateKey);
+	}
 }
 
 unsigned int getKernelExecutionTimeMicros(cl_event & e) {
@@ -201,7 +470,7 @@ Dispatcher::Device::~Device() {
 
 }
 
-Dispatcher::Dispatcher(cl_context & clContext, cl_program & clProgram, const Mode mode, const size_t worksizeMax, const size_t inverseSize, const size_t inverseMultiple, const cl_uchar clScoreQuit, const std::string & seedPublicKey)
+Dispatcher::Dispatcher(cl_context & clContext, cl_program & clProgram, const Mode mode, const size_t worksizeMax, const size_t inverseSize, const size_t inverseMultiple, const cl_uchar clScoreQuit, const std::string & seedPublicKey, const std::string & seedPrivateKey)
 	: m_clContext(clContext)
 	, m_clProgram(clProgram)
 	, m_mode(mode)
@@ -214,6 +483,7 @@ Dispatcher::Dispatcher(cl_context & clContext, cl_program & clProgram, const Mod
 	, m_countPrint(0)
 	, m_publicKeyX(fromHex(seedPublicKey.substr(0, 64)))
 	, m_publicKeyY(fromHex(seedPublicKey.substr(64, 64)))
+	, m_seedPrivateKey(seedPrivateKey)
 {
 }
 
@@ -449,7 +719,7 @@ void Dispatcher::handleResult(Device & d) {
 					m_quit = true;
 				}
 
-				printResult(d.m_clSeed, d.m_round, r, i, timeStart, m_mode);
+				printResult(d.m_clSeed, d.m_round, r, i, timeStart, m_mode, m_seedPrivateKey);
 			}
 
 			break;

@@ -1,8 +1,37 @@
-# profanity2
+# tron-vanity
 
-Profanity is a high performance (probably the fastest!) vanity address generator for Ethereum. Create cool customized addresses that you never realized you needed! Recieve Ether in style! Wow!
+TRON 靓号地址生成器 - A high performance vanity address generator for **TRON** network. Create customized addresses with your favorite patterns! Powered by GPU using OpenCL.
 
 ![Screenshot](/img/screenshot.png?raw=true "Wow! That's a lot of zeros!")
+
+## TRON 靓号功能 (TRON Vanity Address Features)
+
+### 🐆 豹子号 (Leopard Number)
+支持生成末尾n位相同的地址
+- 例如: `T...AAAA`, `T...8888`, `T...aaaa`
+- 命令: `--tron-repeat` 或 `-R`
+
+### 📈 顺子号 (Sequential Number)
+支持生成末尾为连续递增或递减的顺子号
+- 例如: `T...12345`, `T...54321`, `T...abcde`
+- 命令: `--tron-sequential` 或 `-S`
+
+### 🎯 自定义后缀 (Custom Suffix)
+支持自定义任意后缀匹配，使用 `X` 作为通配符，支持多个后缀用逗号分隔
+- 单个后缀: `T...5211314`, `T...888XXX`
+- 多个后缀: `888,999,666` (匹配任意一个)
+- 命令: `--tron-suffix <pattern>` 或 `-T <pattern>`
+
+### 🍀 谐音靓号 (Lucky Number Patterns)
+支持生成中国传统吉祥数字谐音靓号
+- `5211314` - 我爱你一生一世
+- `1314521` - 一生一世我爱你
+- `168888` - 一路发发发发
+- `888888` - 发发发发发发
+- `666666` - 六六大顺
+- `520` - 我爱你
+- `1314` - 一生一世
+- 命令: `--tron-lucky` 或 `-L`
 
 # Important to know
 
@@ -40,6 +69,68 @@ Use private keys as 64-symbol hexadecimal string WITH `0x` prefix:
 $ python3
 >>> hex((PRIVATE_KEY_A + PRIVATE_KEY_B) % 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F)
 ```
+
+# TRON Usage (TRON 靓号使用方法)
+
+## Quick Start (快速开始)
+
+现在程序会自动生成密钥对，您只需要选择想要的靓号模式即可：
+
+```bash
+# 编译
+make
+
+# 直接运行 - 程序会自动生成密钥对
+./tron-vanity --tron-repeat
+```
+
+程序会输出：
+- **Seed Private Key**: 种子私钥（请妥善保存！）
+- **Seed Public Key**: 种子公钥  
+- **Result Private Key**: 找到的地址对应的私钥偏移
+
+最终私钥 = (Seed Private Key + Result Private Key) mod N
+
+## TRON Examples (TRON 靓号示例)
+
+```bash
+# 豹子号 - 寻找末尾重复字符的地址 (e.g., T...8888)
+./tron-vanity --tron-repeat
+
+# 顺子号 - 寻找末尾连续字符的地址 (e.g., T...12345)
+./tron-vanity --tron-sequential
+
+# 自定义后缀 - 精确匹配特定后缀 (e.g., T...5211314)
+./tron-vanity --tron-suffix 5211314
+
+# 自定义后缀带通配符 - X表示任意字符 (e.g., T...888abc)
+./tron-vanity --tron-suffix 888XXX
+
+# 多个自定义后缀 - 用逗号分隔，匹配任意一个
+./tron-vanity --tron-suffix 888,999,666,5211314
+
+# 谐音靓号 - 自动匹配中国吉祥数字模式
+./tron-vanity --tron-lucky
+```
+
+## Advanced Usage (高级用法 - 使用自己的公钥)
+
+如果您想使用自己的公钥，可以通过 `-z` 参数指定：
+
+```bash
+# 使用 OpenSSL 生成密钥对
+openssl ecparam -genkey -name secp256k1 -text -noout -outform DER | xxd -p -c 1000 | sed 's/41534e31204f49443a20736563703235366b310a30740201010420/Private Key: /' | sed 's/a00706052b8104000aa144034200/\'$'\nPublic Key: /'
+
+# 使用您的公钥运行 (去掉 "04" 前缀)
+./tron-vanity --tron-repeat -z YOUR_128_CHAR_PUBLIC_KEY
+```
+
+## How It Works
+
+1. **自动生成/提供密钥**: 程序自动生成或使用您提供的密钥对
+2. **GPU搜索**: 程序使用GPU搜索符合条件的靓号地址
+3. **合并私钥**: 将找到的私钥偏移加到种子私钥上
+4. **验证**: 务必验证最终地址是否符合预期
 
 # Usage
 ```
